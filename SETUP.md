@@ -338,7 +338,7 @@ and therefore every result you report for eight weeks.
 ### macOS / Linux
 
 ```bash
-export STUDENT_SEED=7              # use YOUR number
+export STUDENT_SEED=2             # use YOUR number
 ```
 
 `export` only lasts for the current terminal. To make it stick, add that line to `~/.zshrc` (macOS default) or `~/.bashrc` (most Linux), then open a new terminal.
@@ -346,7 +346,7 @@ export STUDENT_SEED=7              # use YOUR number
 ### Windows
 
 ```powershell
-setx STUDENT_SEED 7
+setx STUDENT_SEED 2
 ```
 
 `setx` saves the value permanently — but **it does not apply to the terminal you
@@ -354,11 +354,11 @@ typed it in**. Close that window and open a new one. To also set it for the
 session you are in right now:
 
 ```powershell
-$env:STUDENT_SEED = "7"            # PowerShell
+$env:STUDENT_SEED = "2"            # PowerShell
 ```
 
 ```
-set STUDENT_SEED=7                 # cmd.exe
+set STUDENT_SEED=2                # cmd.exe
 ```
 
 ### Confirm it took, on any platform
