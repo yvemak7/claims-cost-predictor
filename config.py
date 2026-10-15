@@ -17,8 +17,8 @@ different-but-reproducible project per student.
 Changing the seed or the threshold changes the *data*, so regenerate and
 retrain after touching either one:
 
-    STUDENT_SEED=7 python generate_claims_data.py
-    STUDENT_SEED=7 python train.py
+    STUDENT_SEED=2 python generate_claims_data.py
+    STUDENT_SEED=2 python train.py
 """
 import os
 
