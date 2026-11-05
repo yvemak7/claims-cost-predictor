@@ -21,9 +21,17 @@ import joblib
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from sklearn.metrics import (
+    roc_curve,
+    roc_auc_score,
+    precision_recall_curve,
+    average_precision_score
+)
+from sklearn.calibration import calibration_curve
 from sklearn.model_selection import train_test_split
-
+import matplotlib.pyplot as plt
 from config import HIGH_COST_THRESHOLD_USD
+from train import CATEGORICAL_FEATURES, NUMERIC_FEATURES, TARGET, load_data
 
 DATA_PATH = Path("data/member_summary.csv")
 MODEL_PATH = Path("model.joblib")
@@ -55,9 +63,14 @@ RANDOM_STATE = 42
 # ---------------------------------------------------------------------------
 VALID_USE_CASES = ("care_management", "stop_loss", "pricing")
 
-CHOSEN_USE_CASE = "TODO"
-CHOSEN_THRESHOLD = None
-THRESHOLD_JUSTIFICATION = ""
+CHOSEN_USE_CASE = "care_management"
+CHOSEN_THRESHOLD = 0.10
+THRESHOLD_JUSTIFICATION = """I chose a threshold of 0.10 to balance early identification of high-cost members, limited nursing capacity, and financial savings. 
+At this threshold, the model identifies 19 of 24 ture positives (79.2% recall) while flagging 64 of 400 members for outreach. 
+Compared with a threshold of 0.05, it reduces outreach by 25 members while missing only 2 additional high-cost members. Compared with 0.20, it identifies 2 more 
+high-cost members and generates $3,000 more in estimated net savings. If the care management team can handle 64 calls, this threshold maximizes the 
+benefit of early intervention."""
+
 
 # Rough economics for the care-management case, in dollars. Change them if your
 # use case implies different numbers, and say so in your write-up.
@@ -82,7 +95,23 @@ def load_holdout() -> tuple[pd.DataFrame, pd.Series, np.ndarray]:
     hard-coding them:
         pipeline["preprocessor"].feature_names_in_
     """
-    raise NotImplementedError("Implement load_holdout()")
+    pipeline = joblib.load(MODEL_PATH)
+    df = load_data()
+    feature_names = pipeline["preprocessor"].feature_names_in_
+
+    X = df[list(feature_names)]
+    y = df[TARGET].astype(int)
+
+    _, X_test, _, y_test = train_test_split(
+    X,
+    y,
+    test_size=TEST_SIZE,
+    random_state=RANDOM_STATE,
+    stratify=y
+)
+    y_proba = pipeline.predict_proba(X_test)[:, 1]
+
+    return X_test, y_test, y_proba
 
 
 def threshold_sweep(y_true, y_proba, thresholds=None) -> pd.DataFrame:
@@ -98,8 +127,37 @@ def threshold_sweep(y_true, y_proba, thresholds=None) -> pd.DataFrame:
     Watch out for the threshold where nothing gets flagged: precision is 0/0
     there. Decide what you want to report (0.0 is fine) rather than letting
     numpy hand you a nan and a warning.
+    
     """
-    raise NotImplementedError("Implement threshold_sweep()")
+    if thresholds is None:
+        thresholds = np.arange(0.05, 1.0, 0.05)
+
+    results = []
+
+    for threshold in thresholds:
+
+        y_pred = (y_proba >= threshold).astype(int)
+
+        tp = np.sum((y_pred == 1) & (y_true == 1))
+        fp = np.sum((y_pred == 1) & (y_true == 0))
+        fn = np.sum((y_pred == 0) & (y_true == 1))
+
+        n_flagged = tp + fp
+
+        precision = tp / n_flagged if n_flagged > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+        results.append({
+            "threshold": threshold,
+            "n_flagged": n_flagged,
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "precision": precision,
+            "recall": recall
+        })
+
+    return pd.DataFrame(results)
 
 
 def expected_value(tp: int, fp: int, outreach_cost: float, savings_per_tp: float) -> float:
@@ -112,7 +170,8 @@ def expected_value(tp: int, fp: int, outreach_cost: float, savings_per_tp: float
     This is a deliberately crude model of the world. Its job is to make the
     trade-off explicit, not to be right.
     """
-    raise NotImplementedError("Implement expected_value()")
+    return tp * savings_per_tp - (tp + fp) * outreach_cost
+
 
 
 def plot_curves(y_true, y_proba, out_path: Path = REPORT_DIR / "evaluation_curves.png") -> Path:
@@ -136,7 +195,41 @@ def plot_curves(y_true, y_proba, out_path: Path = REPORT_DIR / "evaluation_curve
     Use matplotlib (pip install -r requirements-dev.txt) and remember to
     out_path.parent.mkdir(exist_ok=True) before saving.
     """
-    raise NotImplementedError("Implement plot_curves()")
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    precision, recall, _ = precision_recall_curve(y_true, y_proba)
+    prob_true, prob_pred = calibration_curve(
+        y_true, y_proba, n_bins=10, strategy="quantile"
+    )
+    y_pred = y_proba >= CHOSEN_THRESHOLD
+    tp = sum(y_pred & (y_true == 1))
+    fp = sum(y_pred & (y_true == 0))
+    fn = sum(~y_pred & (y_true == 1))
+    tn = sum(~y_pred & (y_true == 0))
+
+    fig, ax = plt.subplots(1, 3, figsize=(15, 4))
+
+    # ROC curve
+    ax[0].plot(fpr, tpr, label=f"AUC = {roc_auc_score(y_true, y_proba):.2f}")
+    ax[0].scatter(fp / (fp + tn), tp / (tp + fn), color="red")
+    ax[0].set(title="ROC", xlabel="False Positive Rate", ylabel="Recall")
+    ax[0].legend()
+
+    ax[1].plot(recall, precision,
+               label=f"AP = {average_precision_score(y_true, y_proba):.2f}")
+    ax[1].scatter(tp / (tp + fn), tp / (tp + fp), color="red")
+    ax[1].set(title="Precision-Recall", xlabel="Recall", ylabel="Precision")
+    ax[1].legend()
+
+    ax[2].plot(prob_pred, prob_true, marker="o")
+    ax[2].plot([0, 1], [0, 1], linestyle="--", color="gray")
+    ax[2].set(title="Calibration", xlabel="Predicted Probability", ylabel="Observed Probability")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+    return out_path
 
 
 def main() -> None:
