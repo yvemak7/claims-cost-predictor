@@ -65,6 +65,14 @@ jobs:
       # runs on the PR itself, so you will see whether you got it right before
       # anything reaches main.
       # -------------------------------------------------------------------
+<<<<<<< Updated upstream
       - name: Run the test suite
         run: python -m pytest -v
 
+=======
+      - name: Train model
+        run: python train.py
+
+      - name: Run tests
+        run: pytest
+>>>>>>> Stashed changes
