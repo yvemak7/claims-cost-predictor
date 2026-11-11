@@ -17,13 +17,13 @@ different-but-reproducible project per student.
 Changing the seed or the threshold changes the *data*, so regenerate and
 retrain after touching either one:
 
-    STUDENT_SEED=7 python generate_claims_data.py
-    STUDENT_SEED=7 python train.py
+    STUDENT_SEED=2 python generate_claims_data.py
+    STUDENT_SEED=2 python train.py
 """
 import os
 
 HIGH_COST_THRESHOLD_USD = int(os.environ.get("HIGH_COST_THRESHOLD_USD", 25_000))
 HIGH_COST_THRESHOLD_CENTS = HIGH_COST_THRESHOLD_USD * 100
 
-STUDENT_SEED = int(os.environ.get("STUDENT_SEED", 42))
+STUDENT_SEED = int(os.environ.get("STUDENT_SEED", 2))
 N_MEMBERS = int(os.environ.get("N_MEMBERS", 2_000))

@@ -66,5 +66,9 @@ jobs:
       # anything reaches main.
       # -------------------------------------------------------------------
       - name: Run the test suite
+<<<<<<< HEAD
         run: |
           python -m pytest -q
+=======
+        run: python -m pytest -v
+>>>>>>> week-02-eda
