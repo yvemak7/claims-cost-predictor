@@ -65,6 +65,10 @@ jobs:
       # runs on the PR itself, so you will see whether you got it right before
       # anything reaches main.
       # -------------------------------------------------------------------
+      - name: Train model
+        run: python train.py
+      
       - name: Run the test suite
         run: python -m pytest -v
+
 

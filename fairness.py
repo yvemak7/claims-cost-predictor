@@ -67,12 +67,16 @@ def confusion_counts(y_true, y_pred) -> dict[str, int]:
     Write it with vectorized comparisons rather than a loop. Both inputs are
     0/1 arrays or Series.
     """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
 
     tp = np.sum((y_true == 1) & (y_pred == 1))
     fp = np.sum((y_true == 0) & (y_pred == 1))
     fn = np.sum((y_true == 1) & (y_pred == 0))
     tn = np.sum((y_true == 0) & (y_pred == 0))
-    return {"tp": tp, "fp": fp, "fn": fn, "tn": tn}
+
+    return {"tp": int(tp), "fp": int(fp),
+            "fn": int(fn), "tn": int(tn)}
 
 
 def group_metrics(df: pd.DataFrame, group_col: str,
