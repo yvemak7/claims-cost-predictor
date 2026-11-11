@@ -24,14 +24,21 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+from sklearn import clone
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
 from config import HIGH_COST_THRESHOLD_USD
+from train import TEST_SIZE, RANDOM_STATE, CATEGORICAL_FEATURES, NUMERIC_FEATURES, TARGET, load_data
 
 DATA_PATH = Path("data/member_summary.csv")
 MODEL_PATH = Path("model.joblib")
 REPORT_PATH = Path("reports/fairness_report.md")
 
 PROTECTED_COLUMNS = ["sex", "age_bucket"]
-DECISION_THRESHOLD = 0.5  # swap in the threshold you defended in Week 5
+DECISION_THRESHOLD = 0.1  # swap in the threshold you defended in Week 5
 
 # ---------------------------------------------------------------------------
 # TODO 6 — your written assessment.
@@ -42,8 +49,16 @@ DECISION_THRESHOLD = 0.5  # swap in the threshold you defended in Week 5
 # too small to conclude anything, say that instead of reporting a ratio to two
 # decimal places as if it meant something.
 # ---------------------------------------------------------------------------
-ASSESSMENT = ""
-
+ASSESSMENT = """
+"The fairness audit shows that sex passes the 80% rule (ratio 0.815), with females flagged slightly 
+more often than males (13.02% vs. 10.60%). Age shows a larger disparity (ratio 0.293), with members 
+aged 18–29 flagged least often (5.28%) compared to ages 60–64 (18.04%). However, the youngest group 
+also has a much lower actual high-cost rate (1.76% vs. 8.76%) and only five high-cost members, 
+limiting conclusions. Ages 40–49 have the highest false negative rate (6.12%). Removing demographic 
+features improves the ratios for sex (0.815 to 0.931) and age (0.293 to 0.352), but age disparity 
+remains, possibly due to other features acting as demographic proxies. Since the audit includes 
+training data, these findings should be interpreted cautiously.
+"""
 
 def confusion_counts(y_true, y_pred) -> dict[str, int]:
     """
@@ -52,7 +67,12 @@ def confusion_counts(y_true, y_pred) -> dict[str, int]:
     Write it with vectorized comparisons rather than a loop. Both inputs are
     0/1 arrays or Series.
     """
-    raise NotImplementedError("Implement confusion_counts()")
+
+    tp = np.sum((y_true == 1) & (y_pred == 1))
+    fp = np.sum((y_true == 0) & (y_pred == 1))
+    fn = np.sum((y_true == 1) & (y_pred == 0))
+    tn = np.sum((y_true == 0) & (y_pred == 0))
+    return {"tp": tp, "fp": fp, "fn": fn, "tn": tn}
 
 
 def group_metrics(df: pd.DataFrame, group_col: str,
@@ -74,7 +94,35 @@ def group_metrics(df: pd.DataFrame, group_col: str,
     across runs. Guard the divisions: a group with zero actual positives has no
     TPR, and reporting 0.0 there is a lie — use np.nan.
     """
-    raise NotImplementedError("Implement group_metrics()")
+    rows = []
+    for group, group_df in df.groupby(group_col):
+        counts = confusion_counts(group_df[y_true_col], group_df[y_pred_col])
+        tp = counts["tp"]
+        fp = counts["fp"]
+        fn = counts["fn"]
+        tn = counts["tn"]
+
+        n = tp + fp + fn + tn
+        base_rate = (tp+fn) / n if n > 0 else np.nan
+        positive_rate = (tp+fp) / n if n > 0 else np.nan
+        tpr = tp/(tp+fn) if (tp+fn) > 0 else np.nan
+        fpr = fp/(fp+tn) if (fp+tn) > 0 else np.nan
+        fnr = 1-tpr if not np.isnan(tpr) else np.nan
+        precision = tp/(tp+fp) if (tp+fp) > 0 else np.nan
+
+        rows.append({
+            "group": group,
+            "n": n,
+            "base_rate": base_rate,
+            "positive_rate": positive_rate,
+            "tpr": tpr,
+            "fpr": fpr,
+            "fnr": fnr,
+            "precision": precision
+        })
+    
+    return pd.DataFrame(rows).sort_values("group").reset_index(drop=True)
+
 
 
 def disparate_impact_ratio(rates: pd.Series) -> float:
@@ -83,7 +131,13 @@ def disparate_impact_ratio(rates: pd.Series) -> float:
 
     Ignore nan rates. Returns a number in [0, 1], where 1.0 is exact parity.
     """
-    raise NotImplementedError("Implement disparate_impact_ratio()")
+    rates = rates.dropna()
+    if len(rates) == 0:
+        return np.nan
+    highest = rates.max()
+    lowest = rates.min()
+
+    return lowest / highest if highest > 0 else np.nan
 
 
 def passes_80_percent_rule(ratio: float) -> bool:
@@ -92,7 +146,7 @@ def passes_80_percent_rule(ratio: float) -> bool:
 
     Careful with the boundary: exactly 0.80 passes.
     """
-    raise NotImplementedError("Implement passes_80_percent_rule()")
+    return bool(ratio >= 0.80)
 
 
 def blind_model_comparison(df: pd.DataFrame) -> pd.DataFrame:
@@ -117,7 +171,59 @@ def blind_model_comparison(df: pd.DataFrame) -> pd.DataFrame:
     information the demographic columns did? Check with:
         df.groupby("sex")[numeric_cols].mean()
     """
-    raise NotImplementedError("Implement blind_model_comparison()")
+    pipeline = joblib.load(MODEL_PATH)
+    full_df = load_data()
+
+    original_features = list(pipeline["preprocessor"].feature_names_in_)
+    blind_features = [col for col in original_features if col not in PROTECTED_COLUMNS]
+
+    cat_cols = [col for col in blind_features if full_df[col].dtype == "object"]
+    num_cols = [col for col in blind_features if col not in cat_cols]
+
+    processor = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), num_cols),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols)
+        ]
+    )
+    
+    X = full_df[CATEGORICAL_FEATURES + NUMERIC_FEATURES]
+    y = full_df[TARGET].astype(int)
+
+
+    X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=TEST_SIZE,
+    stratify=y,
+    random_state=RANDOM_STATE
+)
+    blind_pipeline = Pipeline([('preprocessor', processor), ('classifier', clone(pipeline.steps[-1][1]))])
+
+    blind_pipeline.fit(
+        X_train[blind_features],
+        y_train
+    )
+
+    blind_y_proba = blind_pipeline.predict_proba(df[blind_features])[:, 1]
+
+    threshold = DECISION_THRESHOLD
+
+    blind_y_pred = (blind_y_proba >= threshold).astype(int)
+
+    blind_df = df.copy()
+    blind_df["y_pred"] = blind_y_pred
+
+    row = []
+    for col in PROTECTED_COLUMNS:
+        table = group_metrics(blind_df, col)
+        ratio = disparate_impact_ratio(table.set_index("group")["positive_rate"])
+        row.append({
+            "protected_column": col,
+            "disparate_impact_with_demo": disparate_impact_ratio(group_metrics(df, col).set_index("group")["positive_rate"]),
+            "disparate_impact_without_demo": ratio
+        })
+    return pd.DataFrame(row).sort_values("protected_column").reset_index(drop=True)
 
 
 def main() -> None:
