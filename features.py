@@ -74,21 +74,21 @@ VALID_VERDICTS = ("safe", "leaky", "debatable", "not_a_feature")
 # spending happens. Keep that timeline in mind.
 # ---------------------------------------------------------------------------
 FEATURE_AUDIT: dict[str, tuple[str, str]] = {
-    "age_bucket": ("TODO", ""),
-    "sex": ("TODO", ""),
-    "region": ("TODO", ""),
-    "total_claims": ("TODO", ""),
-    "medical_claims": ("TODO", ""),
-    "pharmacy_claims": ("TODO", ""),
-    "specialty_drug_fills": ("TODO", ""),
-    "total_billed_cents": ("TODO", ""),
-    "total_allowed_cents": ("TODO", ""),
-    "total_plan_paid_cents": ("TODO", ""),
-    "total_oop_cents": ("TODO", ""),
-    "unique_diagnosis_codes": ("TODO", ""),
-    "inpatient_claims": ("TODO", ""),
-    "has_specialty_drug": ("TODO", ""),
-    "is_high_cost": ("TODO", ""),
+    "age_bucket": ("safe", "age is known at the start of the plan year"),
+    "sex": ("safe", "sex is known at the start of the plan year"),
+    "region": ("safe", "region is known at the start of the plan year"),
+    "total_claims": ("debatable", "total_claim count may include claims that happen after the prediction date, feature should be excluded or used with caution"),
+    "medical_claims": ("debatable", "medical_claim count may include claims that happen after the prediction date, feature should be excluded or used with caution"),
+    "pharmacy_claims": ("debatable", "pharmacy_claim count may include claims that happen after the prediction date, feature should be excluded or used with caution"),
+    "specialty_drug_fills": ("debatable", "specialty_drug_fill count may include fills that happen after the prediction date, feature should be excluded or used with caution"),
+    "total_billed_cents": ("leaky", "total_billed amount is known at the end of the plan year, feature should be excluded"),
+    "total_allowed_cents": ("leaky", "total_allowed amount is known at the end of the plan year, feature should be excluded"),
+    "total_plan_paid_cents": ("leaky", "total_plan_paid amount is known at the end of the plan year, feature should be excluded"),
+    "total_oop_cents": ("leaky", "total_oop amount is known at the end of the plan year, feature should be excluded"),
+    "unique_diagnosis_codes": ("debatable", "unique_diagnosis_codes may include codes that are assigned after the prediction date, feature should be excluded or used with caution"),
+    "inpatient_claims": ("debatable", "inpatient_claim count may include claims that happen after the prediction date, feature should be excluded or used with caution"),
+    "has_specialty_drug": ("debatable", "has_specialty_drug may include fills that happen after the prediction date, feature should be excluded or used with caution"),
+    "is_high_cost": ("not_a_feature", "is_high_cost is the label we are trying to predict"),
 }
 
 
@@ -112,7 +112,9 @@ def approved_claims(claims: pd.DataFrame) -> pd.DataFrame:
 
     Roughly 8% of claims are denied, so this line changes your numbers.
     """
-    raise NotImplementedError("Implement approved_claims()")
+    approved = claims[claims["adjudication_status"].str.lower() == "approved"]
+
+    return approved
 
 
 def build_member_features(members: pd.DataFrame, claims: pd.DataFrame) -> pd.DataFrame:
@@ -146,8 +148,43 @@ def build_member_features(members: pd.DataFrame, claims: pd.DataFrame) -> pd.Dat
         for them. Should their total_claims be NaN, or 0? Whatever you choose,
         the column dtypes should still be numeric.
     """
-    raise NotImplementedError("Implement build_member_features()")
+    df = claims.groupby("member_id").agg(
+        total_claims=("claim_id", "size"),
+        medical_claims=("is_pharmacy", lambda x: (~x).sum()),
+        pharmacy_claims=("is_pharmacy", "sum"),
+        specialty_drug_fills=("is_specialty_drug", "sum"),
+        total_billed_cents=("billed_cents", "sum"),
+        total_allowed_cents=("allowed_cents", "sum"),
+        total_plan_paid_cents=("plan_paid_cents", "sum"),
+        total_oop_cents=("out_of_pocket_cents", "sum"),
+        unique_diagnosis_codes=("diagnosis_code", lambda x: x.dropna().loc[x.dropna().str.strip() != ""].nunique()),
+        inpatient_claims=("claim_type", lambda x: (x == "Institutional").sum()),
+        has_specialty_drug=("is_specialty_drug", "any")
+    ).reset_index()
 
+    
+    result = members.merge(df, on="member_id", how="left")
+
+    calculated_cols = [
+        "total_claims",
+        "medical_claims",
+        "pharmacy_claims",
+        "specialty_drug_fills",
+        "total_billed_cents",
+        "total_allowed_cents",
+        "total_plan_paid_cents",
+        "total_oop_cents",
+        "unique_diagnosis_codes",
+        "inpatient_claims"
+    ]
+
+    result[calculated_cols] = result[calculated_cols].fillna(0).astype(int)
+
+    result["has_specialty_drug"] = (
+        result["has_specialty_drug"].fillna(False).astype(bool)
+    )
+
+    return result
 
 def add_label(features: pd.DataFrame) -> pd.DataFrame:
     """
@@ -160,7 +197,9 @@ def add_label(features: pd.DataFrame) -> pd.DataFrame:
     Write the one line that creates the label, then look hard at which column
     you just used. You will need that thought in TODO 4.
     """
-    raise NotImplementedError("Implement add_label()")
+
+    features["is_high_cost"] = (features["total_plan_paid_cents"] > HIGH_COST_THRESHOLD_CENTS).astype(int)
+    return features
 
 
 def model_features() -> list[str]:
@@ -171,7 +210,12 @@ def model_features() -> list[str]:
     changing a verdict above changes what the model sees. Decide for yourself
     whether "debatable" columns are in or out, and be ready to defend it.
     """
-    raise NotImplementedError("Implement model_features()")
+
+    return [
+        column
+        for column, (verdict, justification) in FEATURE_AUDIT.items()
+        if verdict == "safe"
+    ]
 
 
 def print_audit() -> None:
