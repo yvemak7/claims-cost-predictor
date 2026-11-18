@@ -69,6 +69,5 @@ jobs:
         run: python train.py
       
       - name: Run the test suite
-        run: python -m pytest -v
-
-
+        run: |
+          python -m pytest -q
