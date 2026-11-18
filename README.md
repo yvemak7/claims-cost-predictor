@@ -68,7 +68,7 @@ This means your results will not match your neighbour's, and that is the point. 
 Changing the seed changes the label, so regenerate **and** retrain afterwards:
 
 ```bash
-export STUDENT_SEED=7
+export STUDENT_SEED=2
 python generate_claims_data.py
 python train.py
 ```
