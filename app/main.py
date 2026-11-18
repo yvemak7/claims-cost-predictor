@@ -23,7 +23,7 @@ from app.schemas import MemberFeatures, PredictionResponse
 from config import HIGH_COST_THRESHOLD_USD
 
 MODEL_PATH = Path("model.joblib")
-DECISION_THRESHOLD = 0.5  # the threshold you defended in Week 5
+DECISION_THRESHOLD = 0.1 # the threshold you defended in Week 5
 
 model = None
 
@@ -45,7 +45,12 @@ async def lifespan(app: FastAPI):
 
     Everything before `yield` runs at startup, everything after at shutdown.
     """
-    raise NotImplementedError("Implement the lifespan handler")
+    global model
+    if not MODEL_PATH.exists():
+        raise RuntimeError(
+            "Model file not found. Run python train.py first."
+        )
+    model = joblib.load(MODEL_PATH)
     yield  # noqa: unreachable until you implement the TODO above
 
 
@@ -67,6 +72,7 @@ def health():
     than hard-coding True; "the process is up" and "the service can serve" are
     different claims.
     """
+    return {"status": "ok", "model_loaded": model is not None}
     raise NotImplementedError("Implement GET /health")
 
 
@@ -95,4 +101,14 @@ def predict(features: MemberFeatures):
     nonsense (pharmacy_claims greater than total_claims, say). FastAPI will not
     catch that for you.
     """
-    raise NotImplementedError("Implement POST /predict")
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    row = pd.DataFrame([features.model_dump()])
+    prob = model.predict_proba(row)[0][1]
+    is_high_cost = prob >=DECISION_THRESHOLD
+    return PredictionResponse(
+        probability = round(prob, 4),
+        is_high_cost = is_high_cost,
+        threshold_dollars = HIGH_COST_THRESHOLD_USD
+    )
