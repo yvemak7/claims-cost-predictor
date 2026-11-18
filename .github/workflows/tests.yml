@@ -66,5 +66,5 @@ jobs:
       # anything reaches main.
       # -------------------------------------------------------------------
       - name: Run the test suite
-        run: python -m pytest -v
-
+        run: |
+          python -m pytest -q
