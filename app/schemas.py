@@ -42,7 +42,19 @@ class MemberFeatures(BaseModel):
     """
 
     # TODO: replace this line with your fields.
-    ...
+    age_bucket: Literal[
+        "18-29", "30-39", "40-49",
+        "50-59", "60-64"
+    ]
+    sex: Literal["F", "M"]
+    region: Literal["Northeast", "Southeast", "Midwest", "Southwest", "West"]
+    total_claims: int = Field(ge=0)
+    medical_claims: int = Field(ge=0)
+    pharmacy_claims: int = Field(ge=0)
+    inpatient_claims: int = Field(ge=0)
+    has_specialty_drug: bool
+    specialty_drug_fills: int = Field(ge=0)
+    unique_diagnosis_codes: int = Field(ge=0)
 
 
 class PredictionResponse(BaseModel):
@@ -59,4 +71,6 @@ class PredictionResponse(BaseModel):
     """
 
     # TODO: replace this line with your fields.
-    ...
+    is_high_cost: bool
+    probability: float = Field(ge=0.0, le=1.0)
+    threshold_dollars: int
